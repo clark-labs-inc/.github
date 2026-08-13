@@ -6,7 +6,7 @@ reusable workflow to a full commit SHA.
 
 Available gates:
 
-- `rust-library.yml`: format, clippy, tests, and doctests for Rust libraries.
+- `rust-library.yml`: build, tests, and doctests for Rust libraries.
 - `rust-research.yml`: dependency build and compiler smoke for Rust research.
 - `python-research.yml`: dependency-free Python syntax smoke for research repos.
 - `zig-library.yml`: checksum-pinned Zig 0.16.0 build and test gate.
