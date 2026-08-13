@@ -1,0 +1,64 @@
+name: Reusable Rust library CI
+
+on:
+  workflow_call:
+    inputs:
+      rust-version:
+        description: Rust toolchain version.
+        required: false
+        type: string
+        default: "1.97.1"
+      working-directory:
+        description: Directory containing Cargo.toml.
+        required: false
+        type: string
+        default: "."
+      check-command:
+        description: Compiler and lint gate.
+        required: false
+        type: string
+        default: cargo clippy --all-targets --all-features -- -D warnings
+      test-command:
+        description: Test gate.
+        required: false
+        type: string
+        default: cargo test --all-features
+      doc-command:
+        description: Documentation or doctest gate. Use an empty string to skip.
+        required: false
+        type: string
+        default: cargo test --doc --all-features
+
+permissions:
+  contents: read
+
+jobs:
+  rust:
+    name: Rust library
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c
+        with:
+          toolchain: ${{ inputs.rust-version }}
+          components: rustfmt, clippy
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+      - name: Check compiler and lints
+        env:
+          CLARK_CI_COMMAND: ${{ inputs.check-command }}
+        run: bash -euo pipefail -c "$CLARK_CI_COMMAND"
+      - name: Run tests
+        env:
+          CLARK_CI_COMMAND: ${{ inputs.test-command }}
+        run: bash -euo pipefail -c "$CLARK_CI_COMMAND"
+      - name: Run documentation gate
+        if: inputs.doc-command != ''
+        env:
+          CLARK_CI_COMMAND: ${{ inputs.doc-command }}
+        run: bash -euo pipefail -c "$CLARK_CI_COMMAND"

@@ -1,0 +1,46 @@
+name: Reusable Zig library CI
+
+on:
+  workflow_call:
+    inputs:
+      working-directory:
+        description: Directory containing build.zig.
+        required: false
+        type: string
+        default: "."
+      build-command:
+        description: Zig build and test gate.
+        required: false
+        type: string
+        default: zig build
+
+permissions:
+  contents: read
+
+jobs:
+  zig:
+    name: Zig library
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: ${{ inputs.working-directory }}
+    steps:
+      - name: Check out source
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Install checksum-pinned Zig 0.16.0
+        shell: bash
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/zig.tar.xz"
+          curl --proto '=https' --tlsv1.2 --fail --location --retry 5 \
+            --output "$archive" \
+            https://ziglang.org/download/0.16.0/zig-x86_64-linux-0.16.0.tar.xz
+          echo "70e49664a74374b48b51e6f3fdfbf437f6395d42509050588bd49abe52ba3d00  $archive" | sha256sum --check --strict
+          tar --extract --xz --file "$archive" --directory "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/zig-x86_64-linux-0.16.0" >> "$GITHUB_PATH"
+      - name: Verify Zig version
+        run: test "$(zig version)" = "0.16.0"
+      - name: Build and test
+        env:
+          CLARK_CI_COMMAND: ${{ inputs.build-command }}
+        run: bash -euo pipefail -c "$CLARK_CI_COMMAND"
