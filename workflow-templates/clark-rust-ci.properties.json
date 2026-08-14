@@ -1,0 +1,6 @@
+{
+  "name": "Clark Rust CI",
+  "description": "Pinned Rust, kache, nextest, lint, docs, and dependency-policy gates.",
+  "iconName": "octicon shield-check",
+  "categories": ["Rust"]
+}
