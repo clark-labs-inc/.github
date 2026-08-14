@@ -4,58 +4,151 @@ on:
   workflow_call:
     inputs:
       rust-version:
-        description: Rust toolchain version.
+        description: Exact Rust toolchain version.
         required: false
         type: string
         default: "1.97.1"
+      nextest-version:
+        description: Exact cargo-nextest version.
+        required: false
+        type: string
+        default: "0.9.143"
       working-directory:
         description: Directory containing Cargo.toml.
         required: false
         type: string
         default: "."
+      format-command:
+        description: Formatting gate. Use an empty string to skip.
+        required: false
+        type: string
+        default: cargo fmt --all -- --check
       build-command:
         description: Compiler and build gate.
         required: false
         type: string
-        default: cargo check --all-targets --all-features
+        default: cargo check --all-targets --all-features --locked
+      clippy-command:
+        description: Lint gate. Use an empty string to skip.
+        required: false
+        type: string
+        default: cargo clippy --all-targets --all-features --locked -- -D warnings
       test-command:
         description: Test gate.
         required: false
         type: string
-        default: cargo test --all-features
-      doc-command:
-        description: Documentation or doctest gate. Use an empty string to skip.
+        default: cargo nextest run --all-targets --all-features --locked --no-fail-fast
+      doc-test-command:
+        description: Doctest gate. Use an empty string to skip.
         required: false
         type: string
-        default: cargo test --doc --all-features
+        default: cargo test --doc --all-features --locked
+      doc-command:
+        description: Documentation gate. Use an empty string to skip.
+        required: false
+        type: string
+        default: RUSTDOCFLAGS="-D warnings" cargo doc --no-deps --all-features --locked
+      run-cargo-deny:
+        description: Run the dependency policy gate.
+        required: false
+        type: boolean
+        default: true
+      cargo-deny-arguments:
+        description: Arguments passed to cargo-deny before its check command.
+        required: false
+        type: string
+        default: --all-features
 
 permissions:
   contents: read
+
+concurrency:
+  group: rust-library-${{ github.repository }}-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   rust:
     name: Rust library
     runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      CARGO_INCREMENTAL: 0
+      CARGO_TERM_COLOR: always
     defaults:
       run:
         working-directory: ${{ inputs.working-directory }}
     steps:
       - name: Check out source
         uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
-      - name: Install Rust
+      - name: Install exact Rust toolchain
         uses: dtolnay/rust-toolchain@4360b52568e2003a75bf9bc1d59f33a8e3fc893c
         with:
           toolchain: ${{ inputs.rust-version }}
+          components: clippy,rustfmt
+      - name: Cache Cargo registry and installed tools
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          workspaces: ${{ inputs.working-directory }}
+          cache-targets: false
+      - name: Set up exact kache compiler cache
+        uses: kunobi-ninja/kache-action@49398d37113c616fdb61be434cb497e3c2c8f3e6 # v1
+        with:
+          version: 0.14.2
+          cache-key-prefix: clark-library
+      - name: Restore exact cargo-nextest executable
+        id: nextest-cache
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cargo/bin/cargo-nextest
+          key: cargo-nextest-${{ runner.os }}-${{ runner.arch }}-${{ inputs.nextest-version }}
+      - name: Install exact cargo-nextest executable
+        if: steps.nextest-cache.outputs.cache-hit != 'true'
+        run: cargo install cargo-nextest --version "${{ inputs.nextest-version }}" --locked
+      - name: Cache exact cargo-nextest executable
+        if: steps.nextest-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
+        with:
+          path: ~/.cargo/bin/cargo-nextest
+          key: cargo-nextest-${{ runner.os }}-${{ runner.arch }}-${{ inputs.nextest-version }}
+      - name: Check formatting
+        if: inputs.format-command != ''
+        env:
+          CLARK_CI_COMMAND: ${{ inputs.format-command }}
+        run: bash -euo pipefail -c "$CLARK_CI_COMMAND"
       - name: Build all targets
         env:
           CLARK_CI_COMMAND: ${{ inputs.build-command }}
         run: bash -euo pipefail -c "$CLARK_CI_COMMAND"
-      - name: Run tests
+      - name: Run clippy
+        if: inputs.clippy-command != ''
+        env:
+          CLARK_CI_COMMAND: ${{ inputs.clippy-command }}
+        run: bash -euo pipefail -c "$CLARK_CI_COMMAND"
+      - name: Run tests with nextest
         env:
           CLARK_CI_COMMAND: ${{ inputs.test-command }}
         run: bash -euo pipefail -c "$CLARK_CI_COMMAND"
-      - name: Run documentation gate
+      - name: Run doctests
+        if: inputs.doc-test-command != ''
+        env:
+          CLARK_CI_COMMAND: ${{ inputs.doc-test-command }}
+        run: bash -euo pipefail -c "$CLARK_CI_COMMAND"
+      - name: Build documentation with warnings denied
         if: inputs.doc-command != ''
         env:
           CLARK_CI_COMMAND: ${{ inputs.doc-command }}
         run: bash -euo pipefail -c "$CLARK_CI_COMMAND"
+
+  dependency-policy:
+    name: Dependency policy
+    if: inputs.run-cargo-deny
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Check out source
+        uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09 # v5
+      - name: Check advisories, licenses, bans, and sources
+        uses: EmbarkStudios/cargo-deny-action@9c67a826e39827395bfa619cd85cb2aaeb43cfaa
+        with:
+          manifest-path: ${{ inputs.working-directory }}/Cargo.toml
+          arguments: ${{ inputs.cargo-deny-arguments }}
